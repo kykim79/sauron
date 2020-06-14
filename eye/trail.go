@@ -5,9 +5,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/ActiveState/tail"
 	"github.com/Sirupsen/logrus"
-	fsnotify "gopkg.in/fsnotify.v1"
+	"github.com/hpcloud/tail"
+	"gopkg.in/fsnotify.v1"
 )
 
 // Line contains a log line of a log file.
@@ -22,7 +22,7 @@ type Line struct {
 type LineHandler func(line Line) error
 
 // Trail represents a log trail that can be followed for new lines. In
-// conjuction with a Watcher, a Trail is capable of monitoring existing and new
+// conjunction with a Watcher, a Trail is capable of monitoring existing and new
 // files in a directory.
 //
 // However, unlike the Watcher, a Trail is limited to traditional filesystems.
@@ -67,7 +67,7 @@ func NewTrailWithOptions(watcher Watcher, options *TrailOptions) *Trail {
 }
 
 // Follow starts following a trail. Every time a file is changed, the affected
-// lines will be passed to the handler function to be proccessed. The handler
+// lines will be passed to the handler function to be processed. The handler
 // function could do something as simple as writing the lines that standard
 // output, or do more advanced things like writing to an external log server.
 func (t *Trail) Follow(handler LineHandler) error {
@@ -115,7 +115,7 @@ func (t *Trail) Follow(handler LineHandler) error {
 
 				// Stop any tailers
 				for _, current := range t.tails {
-					current.Stop()
+					_ = current.Stop()
 				}
 
 				// Exit the goroutine
@@ -184,7 +184,7 @@ func (t *Trail) followFile(path string, handler LineHandler, isNew bool) {
 				Err:  line.Err,
 			}
 
-			handler(newLine)
+			_ = handler(newLine)
 		}
 	}()
 }

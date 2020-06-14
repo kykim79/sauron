@@ -23,10 +23,10 @@ package main
 
 import (
 	"fmt"
-	"os"
-
-	"github.com/codegangsta/cli"
 	"github.com/etcinit/sauron/console"
+	"github.com/rs/zerolog/log"
+	"gopkg.in/urfave/cli.v1"
+	"os"
 )
 
 func main() {
@@ -36,11 +36,11 @@ func main() {
 	app.Usage = "Utility for monitoring files in a directory"
 
 	// Set version and authorship info
-	app.Version = "0.0.5"
-	app.Author = "Eduardo Trujillo <ed@chromabits.com>"
+	app.Version = "0.1.5"
+	app.Author = "Eduardo Trujillo <ed@chromabits.com>, Kwon Young, Kim <kykim79@gmail.com>"
 
 	cli.VersionPrinter = func(c *cli.Context) {
-		fmt.Fprintf(c.App.Writer, "%v", c.App.Version)
+		_, _ = fmt.Fprintf(c.App.Writer, "%v", c.App.Version)
 	}
 
 	app.Flags = []cli.Flag{
@@ -48,24 +48,31 @@ func main() {
 			Name:  "verbose",
 			Usage: "print verbose output along with logs",
 		},
+		cli.BoolFlag{
+			Name:  "pool",
+			Usage: "poll for changes instead of using fsnotify (for tailing)",
+		},
 		cli.BoolTFlag{
 			Name:  "prefix-path",
-			Usage: "prefix file path to every output line",
+			Usage: "prefix file path to every output line (default)",
 		},
 		cli.BoolFlag{
 			Name:  "prefix-time",
 			Usage: "prefix time to every output line",
 		},
-		cli.BoolFlag{
-			Name:  "poll",
-			Usage: "poll for changes instead of using fsnotify (for tailing)",
+		cli.StringFlag{
+			Name:  "conf",
+			Usage: "config file",
 		},
 	}
 
 	// Setup the default action. This action will be triggered when no
-	// subcommand is provided as an argument
+	// sub-command is provided as an argument
 	app.Action = console.MainAction
 
 	// Begin
-	app.Run(os.Args)
+	if err := app.Run(os.Args); err != nil {
+		log.Panic()
+	}
+
 }
