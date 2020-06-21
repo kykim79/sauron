@@ -2,83 +2,120 @@
 package console
 
 import (
+	"encoding/json"
 	"fmt"
+	"github.com/BurntSushi/toml"
+	"github.com/Sirupsen/logrus"
+	"github.com/etcinit/sauron/eye"
+	"github.com/jasonlvhit/gocron"
+	"gopkg.in/urfave/cli.v1"
 	"io/ioutil"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"syscall"
-
-	"github.com/BurntSushi/toml"
-	"github.com/Sirupsen/logrus"
-	"github.com/etcinit/sauron/eye"
-	"gopkg.in/urfave/cli.v1"
+	"time"
 )
+
+type duration struct {
+	time.Duration
+}
+
+func (d *duration) UnmarshalText(text []byte) error {
+	var err error
+	d.Duration, err = time.ParseDuration(string(text))
+	return err
+}
 
 type Config struct {
 	Watch      []watch
 	Log        string // sauron log
-	Pool       bool   // poll for changes instead of using fsnotify (for tailing)
-	Verbose    bool
+	Pool       bool
+	LogLevel   string
 	PrefixTime bool // prefix time to every output line
 	PrefixPath bool // prefix file path to every output line (default)
 }
 
 type watch struct {
-	Paths       []string
-	ExtPattern  string // file extensions to watch
-	LinePattern string // pattern string to match
-	Out         string // file to write output line
-	Desc        string
+	Paths              []string
+	FilePattern        string // file extension pattern
+	FileIgnorePattern  string
+	FileIgnoreDuration duration
+	FileFollowDuration duration
+	PathPattern        string // path pattern
+	LinePattern        string // pattern to match
+	LineIgnorePattern  string // pattern to ignore
+	Out                string // file to write
+	Desc               string
 }
+
+var logger *logrus.Logger
 
 // MainAction is the main action executed when using Sauron.
 func MainAction(c *cli.Context) {
+	done := make(chan bool)
+	writePidFile(c)
 
-	var conf Config
-	if _, err := toml.DecodeFile(c.String("conf"), &conf); err != nil {
-		logrus.Errorln(err)
+	conf, result := setConfig(c)
+	if !result {
 		return
 	}
 
-	if len(conf.Log) > 0 {
-		if f, err := os.OpenFile(conf.Log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-			logrus.SetOutput(f)
-			defer f.Close()
-		} else {
-			logrus.Errorln(err)
-		}
-	}
-
-	conf.Verbose = c.Bool("verbose")
-
-	writePidFile(c)
-
-	done := make(chan bool)
+	setLogger(conf)
 
 	options := &eye.TrailOptions{
 		PollChanges: conf.Pool,
+		Logger:      logger,
 	}
 
-	// Decide whether to output logs.
-	if conf.Verbose {
-		options.Logger = logrus.New()
-	} else {
-		log := logrus.New()
-		log.Out = ioutil.Discard
-		options.Logger = log
+	if logrus.GetLevel() == logrus.DebugLevel {
+		s := gocron.NewScheduler()
+		s.Every(10).Seconds().Do(printMemUsage)
+		<-s.Start()
 	}
 
 	for _, w := range conf.Watch {
 		if outLog, err := os.OpenFile(w.Out, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
-			var extReg *regexp.Regexp
-			if len(w.ExtPattern) > 0 {
-				if r, err := regexp.Compile(w.ExtPattern); err == nil {
-					extReg = r
+
+			if len(w.FilePattern) > 0 {
+				if r, err := regexp.Compile(w.FilePattern); err == nil {
+					logger.Debugln("FilePatternRegex created")
+					options.FileReg = r
 				} else {
-					logrus.Errorln(err)
+					logger.Errorln(err)
+				}
+			}
+
+			if len(w.FileIgnorePattern) > 0 {
+				if r, err := regexp.Compile(w.FileIgnorePattern); err == nil {
+					options.FileIgnoreReg = r
+				} else {
+					logger.Errorln(err)
+				}
+			}
+
+			if w.FileIgnoreDuration.Duration > 0 {
+				options.FileIgnoreDuration = w.FileIgnoreDuration.Duration
+			} else {
+				d, _ := time.ParseDuration("24h")
+				options.FileIgnoreDuration = d * 7
+			}
+
+			if w.FileFollowDuration.Duration > 0 {
+				options.FileFollowDuration = w.FileFollowDuration.Duration
+			} else {
+				d, _ := time.ParseDuration("24h")
+				options.FileFollowDuration = d * 7
+			}
+
+			if len(w.PathPattern) > 0 {
+				if r, err := regexp.Compile(w.PathPattern); err == nil {
+					options.PathReg = r
+				} else {
+					logger.Errorln(err)
 				}
 			}
 
@@ -87,7 +124,16 @@ func MainAction(c *cli.Context) {
 				if r, err := regexp.Compile(w.LinePattern); err == nil {
 					lineReg = r
 				} else {
-					logrus.Errorln(err)
+					logger.Errorln(err)
+				}
+			}
+
+			var ignoreReg *regexp.Regexp
+			if len(w.LineIgnorePattern) > 0 {
+				if r, err := regexp.Compile(w.LineIgnorePattern); err == nil {
+					ignoreReg = r
+				} else {
+					logger.Errorln(err)
 				}
 			}
 
@@ -96,18 +142,22 @@ func MainAction(c *cli.Context) {
 				if watcher, err := eye.NewDirectoryWatcher(directory); err == nil {
 					// Create the new instance of the trail and begin following it.
 					trail := eye.NewTrailWithOptions(watcher, options)
-					if err = trail.Follow(getHandler(c, outLog, extReg, lineReg, w)); err == nil {
+
+					if err = trail.Follow(getHandler(c, outLog, lineReg, ignoreReg, w)); err == nil {
 						trails = append(trails, trail)
 					} else {
-						logrus.Errorln(err)
+						logger.Errorln(err)
 						return
 					}
+
+					go func() {
+						trail.AddUnfollower()
+					}()
 				} else {
-					logrus.Errorln(err)
+					logger.Errorln(err)
 					return
 				}
 			}
-			defer outLog.Close()
 
 			// Wait for an interrupt or kill signal.
 			signalChan := make(chan os.Signal, 1)
@@ -122,29 +172,53 @@ func MainAction(c *cli.Context) {
 					}
 				}
 			}()
-
 		} else {
-			logrus.Errorln(err)
+			logger.Errorln(err)
 			return
 		}
 	}
 	<-done
 }
 
-func contains(s []string, substr string) bool {
-	for _, v := range s {
-		if v == substr {
-			return true
+func setLogger(conf Config) {
+	// Decide whether to output logs.
+	logger = logrus.New()
+	logger.Level.UnmarshalText([]byte(conf.LogLevel))
+	logger.SetOutput(ioutil.Discard)
+	if len(conf.Log) > 0 {
+		if f, err := os.OpenFile(conf.Log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
+			logger.SetOutput(f)
+		} else {
+			logger.Errorln(err)
 		}
 	}
-	return false
+	if b, err := json.Marshal(conf); err == nil {
+		fmt.Println("config: " + string(b))
+	}
+}
+
+func setConfig(c *cli.Context) (Config, bool) {
+	var conf Config
+	if _, err := toml.DecodeFile(c.String("conf"), &conf); err != nil {
+		logger.Errorln(err)
+		return conf, false
+	}
+
+	if c.IsSet("pool") {
+		conf.Pool = c.Bool("pool")
+	}
+
+	if len(conf.LogLevel) == 0 {
+		conf.LogLevel = "info"
+	}
+
+	return conf, true
 }
 
 // getHandler builds the handler function to be used while following a trail.
-func getHandler(c *cli.Context, outLog *os.File, extReg *regexp.Regexp, lineReg *regexp.Regexp, w watch) eye.LineHandler {
+func getHandler(c *cli.Context, outLog *os.File, lineReg *regexp.Regexp, ignoreReg *regexp.Regexp, w watch) eye.LineHandler {
 	return func(line eye.Line) error {
-
-		if extReg != nil && !extReg.MatchString(filepath.Ext(line.Path)) {
+		if ignoreReg != nil && ignoreReg.MatchString(line.Text) {
 			return nil
 		}
 
@@ -162,8 +236,10 @@ func getHandler(c *cli.Context, outLog *os.File, extReg *regexp.Regexp, lineReg 
 			output += "[" + w.Desc + "] "
 		}
 
-		if lineReg != nil && lineReg.MatchString(line.Text) {
-			write(output, line, outLog)
+		if lineReg != nil {
+			if lineReg.MatchString(line.Text) {
+				write(output, line, outLog)
+			}
 		} else {
 			write(output, line, outLog)
 		}
@@ -174,9 +250,9 @@ func getHandler(c *cli.Context, outLog *os.File, extReg *regexp.Regexp, lineReg 
 
 func write(output string, line eye.Line, outLog *os.File) {
 	output += line.Text
-	fmt.Println(output)
+
 	if _, err := outLog.WriteString(output + "\n"); err != nil {
-		logrus.Errorln(err)
+		logger.Errorln(err)
 	}
 }
 
@@ -204,4 +280,23 @@ func writePidFile(c *cli.Context) error {
 	// If we get here, then the pidfile didn't exist,
 	// or the pid in it doesn't belong to the user running this app.
 	return ioutil.WriteFile(pidFile, []byte(fmt.Sprintf("%d", os.Getpid())), 0664)
+}
+
+func task() {
+	logger.Debugln("task running...")
+
+}
+
+func printMemUsage() {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	logger.Debugf("Alloc = %v byte\n", m.Alloc)
+	logger.Debugf("TotalAlloc = %v byte\n", m.TotalAlloc)
+	logger.Debugf("Sys = %v MiB\n", bToMb(m.Sys))
+	logger.Debugf("NumGC = %v\n", m.NumGC)
+	logger.Debugf("Frees = %v\n", m.Frees)
+}
+
+func bToMb(b uint64) uint64 {
+	return b / 1024 / 1024
 }

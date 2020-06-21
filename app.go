@@ -11,14 +11,10 @@
 //
 // It is possible to specify which directory to watch:
 //
-// 	sauron /var/log/hhvm
-//
-// For more detailed output, use the verbose option:
-//
-// 	sauron --verbose /var/log/nginx
+// 	sauron --conf=sauron.conf
 //
 // Most of the code for this tool is available as a standalone package,
-// checkout the https://github.com/etcinit/sauron/tree/master/eye package.
+// checkout the https://github.com/kykim79/sauron package.
 package main
 
 import (
@@ -36,7 +32,7 @@ func main() {
 	app.Usage = "Utility for monitoring files in a directory"
 
 	// Set version and authorship info
-	app.Version = "0.1.5"
+	app.Version = "0.2.5"
 	app.Author = "Eduardo Trujillo <ed@chromabits.com>, Kwon Young, Kim <kykim79@gmail.com>"
 
 	cli.VersionPrinter = func(c *cli.Context) {
@@ -44,10 +40,6 @@ func main() {
 	}
 
 	app.Flags = []cli.Flag{
-		cli.BoolFlag{
-			Name:  "verbose",
-			Usage: "print verbose output along with logs",
-		},
 		cli.BoolFlag{
 			Name:  "pool",
 			Usage: "poll for changes instead of using fsnotify (for tailing)",
