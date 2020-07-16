@@ -3,7 +3,7 @@ package eye
 import (
 	"time"
 
-	fsnotify "gopkg.in/fsnotify.v1"
+	"gopkg.in/fsnotify.v1"
 )
 
 // A Watcher is capable of providing a list of the current files and notify

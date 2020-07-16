@@ -9,7 +9,7 @@ import (
 	"github.com/Sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	fsnotify "gopkg.in/fsnotify.v1"
+	"gopkg.in/fsnotify.v1"
 )
 
 type MockedWatcher struct {

@@ -2,11 +2,10 @@ package eye
 
 import (
 	"errors"
+	"gopkg.in/fsnotify.v1"
 	"os"
 	"path/filepath"
 	"time"
-
-	fsnotify "gopkg.in/fsnotify.v1"
 )
 
 // DirectoryWatcher is an implementation of a Watcher capable of monitoring

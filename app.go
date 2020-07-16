@@ -18,8 +18,8 @@
 package main
 
 import (
+	"./console"
 	"fmt"
-	"github.com/etcinit/sauron/console"
 	"github.com/rs/zerolog/log"
 	"gopkg.in/urfave/cli.v1"
 	"os"

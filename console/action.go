@@ -2,11 +2,11 @@
 package console
 
 import (
+	"../eye"
 	"encoding/json"
 	"fmt"
 	"github.com/BurntSushi/toml"
 	"github.com/Sirupsen/logrus"
-	"github.com/etcinit/sauron/eye"
 	"github.com/jasonlvhit/gocron"
 	"gopkg.in/urfave/cli.v1"
 	"io/ioutil"
